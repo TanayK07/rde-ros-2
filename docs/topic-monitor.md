@@ -11,7 +11,7 @@ The ROS 2 Topic Monitor feature provides an RQT-like interface for monitoring to
   - Generic messages shown as formatted JSON
   - Raw and compressed image topics displayed as images
   - PointCloud2 topics displayed as interactive 3D point clouds using raw WebGPU
-- **Metrics**: View publisher count, subscriber count, and QoS details in tooltips
+- **Metrics**: View publish frequency, publisher count, subscriber count, and QoS details in tooltips
 - **Play/Pause Controls**: Pause and resume topic monitoring per topic or all at once
 
 ## How to Use
@@ -34,6 +34,7 @@ To monitor a topic:
 
 Hover over any topic in the tree to see:
 - Topic type (message type)
+- Publish frequency, measured on hover with a short `ros2 topic hz` run (see below)
 - Number of publishers
 - Number of subscribers
 - **QoS (Quality of Service) settings:**
@@ -43,6 +44,8 @@ Hover over any topic in the tree to see:
   - Lifespan (message validity duration)
   - Liveliness (node liveness policy)
   - Liveliness Lease Duration (timeout for liveliness)
+
+The frequency is only measured for the topic under the pointer. The extension runs `ros2 topic hz` for that topic and stops it at the first rate report or after 3 seconds, whichever comes first. Moving the pointer away stops it early. Results are reused for 10 seconds, and at most two measurements run at once. Topics with no messages in that window, or publishing slower than about 1 Hz, show "no recent messages"; errors are written to the **ROS 2** Output channel.
 
 ### Controlling Topic Monitoring
 

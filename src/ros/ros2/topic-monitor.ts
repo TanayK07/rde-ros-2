@@ -116,42 +116,72 @@ export async function getTopicInfo(topicName: string): Promise<TopicInfo | null>
 }
 
 /**
- * Get frequency statistics for a topic
- * Note: This uses ros2 topic hz which blocks, so use with timeout
+ * Get frequency statistics for a topic with a short ros2 topic hz run.
+ * The run stops at the first complete rate report, after durationSec, or when signal aborts.
+ * Resolves null when no rate was reported; rejects when ros2 topic hz fails.
  */
-export async function getTopicFrequency(topicName: string, durationSec: number = 2): Promise<TopicMetrics | null> {
-  return new Promise(resolve => {
+export async function getTopicFrequency(topicName: string, durationSec: number = 3, signal?: AbortSignal): Promise<TopicMetrics | null> {
+  if (signal?.aborted) {
+    return null;
+  }
+
+  return new Promise((resolve, reject) => {
+    // ros2 topic hz is Python; unbuffered output lets the first report end the run early, and is not lost on Windows kills.
     const process = child_process.spawn("ros2", ["topic", "hz", topicName], {
-      env: extension.env,
+      env: { ...extension.env, PYTHONUNBUFFERED: "1" },
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true
     });
     let output = "";
+    let errorOutput = "";
     let settled = false;
+    let timeout: NodeJS.Timeout | undefined;
 
-    const finish = (result: TopicMetrics | null): void => {
+    const finish = (result: TopicMetrics | null, error?: Error): void => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(timeout);
-      resolve(result);
+      signal?.removeEventListener("abort", onAbort);
+      if (process.exitCode === null && process.signalCode === null) {
+        process.kill();
+      }
+      if (error) {
+        reject(error);
+      } else {
+        resolve(result);
+      }
     };
+    const onAbort = (): void => finish(null);
 
     process.stdout?.on("data", (data: Buffer) => {
       output += data.toString();
+      if (hasCompleteFrequencyReport(output)) {
+        finish(parseTopicFrequency(output));
+      }
     });
-    process.on("error", error => {
-      extension.outputChannel.appendLine(`Error getting topic frequency for ${topicName}: ${error.message}`);
-      finish(null);
+    process.stderr?.on("data", (data: Buffer) => {
+      errorOutput += data.toString();
     });
-    process.on("exit", () => finish(parseTopicFrequency(output)));
+    process.on("error", error => finish(null, error));
+    process.on("exit", code => {
+      const metrics = parseTopicFrequency(output);
+      if (metrics || !code) {
+        finish(metrics);
+      } else {
+        finish(null, new Error(errorOutput.trim() || `ros2 topic hz exited with code ${code}`));
+      }
+    });
 
-    const timeout = setTimeout(() => {
-      process.kill();
-      finish(parseTopicFrequency(output));
-    }, durationSec * 1000);
+    timeout = setTimeout(() => finish(parseTopicFrequency(output)), durationSec * 1000);
+    signal?.addEventListener("abort", onAbort);
   });
+}
+
+/** True once a rate line and the statistics line after it have both been written in full. */
+export function hasCompleteFrequencyReport(output: string): boolean {
+  return /average rate:[^\r\n]*\r?\n[^\r\n]*\r?\n/.test(output);
 }
 
 export function parseTopicFrequency(output: string): TopicMetrics | null {

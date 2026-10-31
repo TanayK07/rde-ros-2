@@ -89,14 +89,16 @@ export class TopicTreeItem extends vscode.TreeItem {
   }
 
   /**
-   * Update tooltip with metrics
+   * Update tooltip with metrics. A null frequency means the topic was sampled but reported no rate.
    */
-  public setMetrics(frequency?: number, publisherCount?: number, subscriberCount?: number, qos?: TopicQoS): void {
+  public setMetrics(frequency?: number | null, publisherCount?: number, subscriberCount?: number, qos?: TopicQoS): void {
     const tooltip = new vscode.MarkdownString();
     tooltip.appendMarkdown(`**${this.topicInfo?.name}**\n\n`);
     tooltip.appendMarkdown(`Type: \`${this.topicInfo?.type}\`\n\n`);
     
-    if (frequency !== undefined && frequency > 0) {
+    if (frequency === null) {
+      tooltip.appendMarkdown(`Frequency: no recent messages\n\n`);
+    } else if (frequency !== undefined && frequency > 0) {
       tooltip.appendMarkdown(`Frequency: ${frequency.toFixed(2)} Hz\n\n`);
     }
     

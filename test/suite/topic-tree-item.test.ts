@@ -40,4 +40,14 @@ describe("ROS 2 Topic Tree", () => {
     assert.ok(tooltip.value.includes("Publishers: 2"));
     assert.ok(tooltip.value.includes("Reliability: RELIABLE"));
   });
+
+  it("says when a sampled topic received no messages", () => {
+    const item = TopicTreeItem.createTopicItem({ name: "/quiet", type: "std_msgs/msg/String" });
+
+    item.setMetrics(null, 1, 0);
+    assert.ok((item.tooltip as vscode.MarkdownString).value.includes("Frequency: no recent messages"));
+
+    item.setMetrics(undefined, 1, 0);
+    assert.ok(!(item.tooltip as vscode.MarkdownString).value.includes("Frequency"));
+  });
 });

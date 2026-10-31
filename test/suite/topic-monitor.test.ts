@@ -5,6 +5,7 @@ import * as assert from "assert";
 
 import {
   createTopicEchoArguments,
+  hasCompleteFrequencyReport,
   parseTopicEchoMessage,
   parseTopicFrequency
 } from "../../src/ros/ros2/topic-monitor";
@@ -44,6 +45,12 @@ enabled: true
     assert.strictEqual(metrics?.averageRate, 29.97);
     assert.strictEqual(metrics?.minRate, 0.032);
     assert.strictEqual(metrics?.maxRate, 0.035);
+  });
+
+  it("waits for a whole topic frequency report before using it", () => {
+    assert.strictEqual(hasCompleteFrequencyReport("average rate: 29.9"), false);
+    assert.strictEqual(hasCompleteFrequencyReport("average rate: 29.970\n\tmin: 0.032s max"), false);
+    assert.strictEqual(hasCompleteFrequencyReport("average rate: 29.970\r\n\tmin: 0.032s max: 0.035s std dev: 0.00100s window: 31\r\n"), true);
   });
 
   it("preserves full-length topic echo output for generic messages", () => {

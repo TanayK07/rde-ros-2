@@ -4,6 +4,7 @@
 import * as vscode from 'vscode';
 import * as topicMonitor from '../ros2/topic-monitor';
 import { TopicInfo, TopicQoS } from '../ros2/topic-types';
+import { TopicFrequencySampler } from './topic-frequency-sampler';
 import { TopicTreeItem, TopicTreeItemType } from './topic-tree-item';
 import { TopicWatchState } from './topic-watch-state';
 
@@ -13,7 +14,6 @@ export class TopicTreeDataProvider implements vscode.TreeDataProvider<TopicTreeI
 
   private subscribedTopics = new Set<string>();
   private topicMetricsCache = new Map<string, {
-    frequency?: number, 
     publisherCount?: number, 
     subscriberCount?: number,
     qos?: TopicQoS,
@@ -27,6 +27,9 @@ export class TopicTreeDataProvider implements vscode.TreeDataProvider<TopicTreeI
   private isWindowFocused = true;
   private readonly watchState = new TopicWatchState();
   private readonly metricsCacheDurationMs = 15000;
+  private readonly frequencySampler = new TopicFrequencySampler(
+    (topicName, signal) => topicMonitor.getTopicFrequency(topicName, 3, signal)
+  );
 
   constructor(
     context: vscode.ExtensionContext,
@@ -98,6 +101,7 @@ export class TopicTreeDataProvider implements vscode.TreeDataProvider<TopicTreeI
     this.topicListRequest = undefined;
     this.topicMetricsCache.clear();
     this.topicMetricsRequests.clear();
+    this.frequencySampler.clear();
     this.refresh();
   }
 
@@ -132,16 +136,46 @@ export class TopicTreeDataProvider implements vscode.TreeDataProvider<TopicTreeI
   }
 
   /**
-   * Get tree item for display
+   * Get tree item for display. Topic tooltips are left unset so they are filled on hover by resolveTreeItem.
    */
   getTreeItem(element: TopicTreeItem): vscode.TreeItem {
-    // Update metrics tooltip if available
-    if (element.type === TopicTreeItemType.Topic && element.topicInfo) {
-      const metrics = this.topicMetricsCache.get(element.topicInfo.name);
-      if (metrics) {
-        element.setMetrics(metrics.frequency, metrics.publisherCount, metrics.subscriberCount, metrics.qos);
-      }
+    return element;
+  }
+
+  /**
+   * Fill a topic's tooltip when it is hovered, sampling the rate of that topic only.
+   * Moving the pointer away cancels the token, which stops the sample.
+   */
+  async resolveTreeItem(item: vscode.TreeItem, element: TopicTreeItem, token: vscode.CancellationToken): Promise<vscode.TreeItem> {
+    if (element.type !== TopicTreeItemType.Topic || !element.topicInfo) {
+      return item;
     }
+
+    const topicName = element.topicInfo.name;
+    const version = this.environmentVersion;
+    const [frequency] = await Promise.all([
+      this.frequencySampler.getFrequency(topicName, token).catch(err => {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        this.outputChannel.appendLine(`Error measuring frequency for ${topicName}: ${errorMessage}`);
+        return undefined;
+      }),
+      this.updateTopicMetrics(topicName).catch(err => {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        this.outputChannel.appendLine(`Error updating metrics for ${topicName}: ${errorMessage}`);
+      })
+    ]);
+
+    if (token.isCancellationRequested || version !== this.environmentVersion) {
+      return item;
+    }
+
+    const metrics = this.topicMetricsCache.get(topicName);
+    element.setMetrics(
+      frequency === undefined ? undefined : frequency ? frequency.averageRate : null,
+      metrics?.publisherCount,
+      metrics?.subscriberCount,
+      metrics?.qos
+    );
     return element;
   }
 
@@ -313,6 +347,7 @@ export class TopicTreeDataProvider implements vscode.TreeDataProvider<TopicTreeI
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
     }
+    this.frequencySampler.clear();
     this._onDidChangeTreeData.dispose();
   }
 }
